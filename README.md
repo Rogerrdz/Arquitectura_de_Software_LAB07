@@ -298,112 +298,6 @@ React_Client/
   ├── .env.local                    # Variables de entorno
   └── package.json
 ```
-
----
-
-## Arquitectura General
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ Frontend React (Puerto 5173)                                │
-│ ├─ Redux store (auth + blueprints state)                    │
-│ ├─ HTTP Client (axios) ──────────┐                          │
-│ └─ STOMP Client ──────────────────┼──────────────────────┐  │
-└─────────────────────────────────┼──────────────────────┼──┘
-                                 │                      │
-                    ┌────────────┘                      │
-                    │ REST API                          │ WebSocket/STOMP
-                    │                                   │
-                    ▼                                   ▼
-        ┌──────────────────────────────────────────────────────┐
-        │ Backend Spring Boot 3.3.x (Puerto 8082)              │
-        │ ├─ SecurityConfig (JWT, CORS)                        │
-        │ ├─ RestController (/api/blueprints/...)              │
-        │ ├─ WebSocketConfig + STOMP Message Handler           │
-        │ ├─ BlueprintsService (orquestación)                  │
-        │ └─ BlueprintPersistence (in-memory o DB)             │
-        └──────────────────────────────────────────────────────┘
-```
-
----
-
-## Actividades del Laboratorio (Parte 3)
-
-### 1. Familiarización con el código base
-- Revisa el paquete `model` con las clases `Blueprint` y `Point`.
-- Entiende la capa `persistence` con `BlueprintPersistence` e `InMemoryBlueprintPersistence`.
-- Analiza la capa `services` (`BlueprintsService`) y el controlador REST.
-- Revisa la configuración de `SecurityConfig` (JWT y CORS) y `WebSocketConfig` (STOMP).
-
-### 2. Autenticación con JWT
-- Login endpoint: `POST /api/auth/login` (usuario/contraseña).
-- Token retornado y almacenado en el cliente.
-- Todos los endpoints REST protegidos con `@PreAuthorize`.
-- WebSocket requiere token en headers de conexión.
-
-### 3. Configuración CORS para desarrollo
-- Aceptar orígenes: `http://localhost:*`, `http://127.0.0.1:*`, `http://[::1]:*`.
-- Permitir credenciales en peticiones CORS.
-- Configurado en `SecurityConfig` y `WebSocketConfig`.
-
-### 4. WebSocket e integración STOMP
-- Endpoint: `/ws-blueprints`.
-- Message handler en `/app/draw` recibe puntos.
-- Broadcast a `/topic/blueprints.{author}.{name}`.
-- Manejo de desconexiones y reconexiones en el cliente.
-
-### 5. Frontend React + Redux
-- Estructura con Redux Toolkit para estado global (auth + blueprints).
-- Componentes funcionales con hooks.
-- STOMP client integrado en `features/blueprints` para sincronización.
-- UI completamente en español.
-- Suite de tests (Vitest) con cobertura de componentes críticos.
-
-### 6. Migración a PostgreSQL (Opcional)
-- Cambia `application.yml` y añade dependencia de PostgreSQL.
-- Implementa `PostgresBlueprintPersistence` si aplica.
-- Usa `@Primary` para activar la nueva implementación.
-
-### 7. Docker (Opcional)
-- `Dockerfile` para compilar imagen del backend.
-- `docker-compose.yml` con servicio PostgreSQL (si usas).
-- Ejecutar con: `docker-compose up --build`.
-
----
-
-## Entregables
-
-1. **Repositorio en GitHub** (https://github.com/Rogerrdz/Arquitectura_de_Software_LAB07.git) con:
-   - Backend Spring Boot 3.3.x con REST API + WebSocket/STOMP.
-   - Frontend React + Vite con autenticación JWT.
-   - CORS configurado para IPv4, IPv6 y localhost.
-   - UI completamente en español.
-   - Documentación Swagger/OpenAPI habilitada.
-
-2. **Funcionamiento integrado:**
-   - Login exitoso desde frontend (user/password123).
-   - CRUD de blueprints (crear, listar, editar, eliminar).
-   - Colaboración en tiempo real con STOMP (2 pestañas sincronizadas).
-   - Tests pasando (4/4 en frontend).
-
-3. **Documentación:**
-   - README con instrucciones de setup (backend + frontend).
-   - Variables de entorno documentadas.
-   - Endpoints REST y STOMP documentados.
-   - Credenciales de prueba proporcionadas.
-
----
-
-## Criterios de Evaluación
-
-| Criterio | Peso | Estado |
-|----------|------|--------|
-| Diseño de API REST (versionamiento, JWT, códigos HTTP) | 20% | Completo |
-| Autenticación y CORS | 15% | Completo |
-| WebSocket/STOMP colaborativo | 20% | Completo |
-| Frontend React integrado + UI en español | 25% | Completo |
-| Documentación + Tests | 20% | Completo |
-
 ---
 
 ## Pruebas Manuales
@@ -497,12 +391,7 @@ curl -i -X DELETE http://localhost:8082/api/blueprints/john/casa \
 - `DELETE /api/v1/blueprints/{author}/{bpname}`
 - `POST /api/auth/login`
 
-## 11. Documentacion complementaria
-
-- `React_Client/README.md`: guia del laboratorio frontend.
-- `React_Client/README_MAIN.md`: guia detallada del monorepo/frontend.
-
-## 12. Troubleshooting rapido
+## Troubleshooting rapido
 
 - Si el frontend no conecta:
   - Verifica que backend este en `http://localhost:8081`.
@@ -512,10 +401,6 @@ curl -i -X DELETE http://localhost:8082/api/blueprints/john/casa \
   - Verifica credenciales `postgres/postgres`.
 - Si hay error de CORS:
   - Abre frontend en `http://localhost:5173` (origen permitido en backend).
-
-## 13. Parte 4 aplicada sobre Parte_3 (tiempo real)
-
-Esta version integra los requerimientos de colaboracion en vivo de la Parte 4 sobre el codigo base de Parte_3.
 
 ### Backend (Spring + STOMP)
 
