@@ -1,0 +1,79 @@
+server:
+  port: 8082
+
+spring:
+  application:
+    name: blueprints-api
+  profiles:
+    active: default
+  mvc:
+    pathmatch:
+      matching-strategy: ant_path_matcher
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+
+# JWT Configuration
+jwt:
+  secret: mySecretKeyForJWTTokenGenerationThatIsAtLeast256BitsLongForHS256Algorithm
+  expiration: 86400000  # 24 hours in milliseconds
+
+# OpenAPI/Swagger configuration
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
+
+# Actuator endpoints (opcional)
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
+
+# Logging
+logging:
+  level:
+    edu.eci.arsw: INFO
+    org.springframework: INFO
+
+---
+# Profile: redundancy
+spring:
+  config:
+    activate:
+      on-profile: redundancy
+
+---
+# Profile: undersampling
+spring:
+  config:
+    activate:
+      on-profile: undersampling
+
+---
+# Profile: postgres - PostgreSQL persistence
+spring:
+  config:
+    activate:
+      on-profile: postgres
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/blueprints_db
+    username: postgres
+    password: postgres
+    driver-class-name: org.postgresql.Driver

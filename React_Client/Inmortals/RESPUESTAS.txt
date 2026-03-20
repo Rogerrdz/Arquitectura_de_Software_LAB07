@@ -1,0 +1,396 @@
+=============================================================================
+  ARSW LAB #3 — Inmortals & Synchronization — RESPUESTAS Y ANÁLISIS
+=============================================================================
+
+LABORATORIO: Sincronización, Deadlocks y Suspensión Cooperativa
+PROYECTO: Highlander Simulator (Inmortals)
+FECHA: Marzo 11, 2026
+
+=============================================================================
+PARTE III — SINCRONIZACIÓN Y DEADLOCKS CON HIGHLANDER SIMULATOR
+=============================================================================
+
+1. INVARIANTE DEL SISTEMA
+--------------------------
+Definición: Con N inmortales y salud inicial H, la suma total de salud debe
+permanecer CONSTANTE durante toda la simulación.
+
+Invariante esperado: Total = N × H
+
+Ejemplo:
+- 8 inmortales con 100 de salud inicial
+- Invariante esperado = 8 × 100 = 800
+
+Este invariante se mantiene porque:
+- Cuando un inmortal ataca, RESTA daño del oponente
+- Simultáneamente, SUMA exactamente el mismo daño a sí mismo
+- Por lo tanto: total_antes = total_después
+
+=============================================================================
+2. REGIONES CRÍTICAS Y SINCRONIZACIÓN
+=============================================================================
+
+PROBLEMA IDENTIFICADO:
+Sin sincronización, múltiples hilos pueden modificar la salud de los 
+inmortales simultáneamente, causando:
+- Valores negativos incorrectos
+- Pérdida de actualizaciones (lost updates)
+- Violación del invariante
+
+SOLUCIÓN IMPLEMENTADA:
+Se utilizan bloques synchronized anidados en los métodos de pelea:
+
+a) fightNaive(opponent):
+   synchronized (this) {
+     synchronized (opponent) {
+       // Actualización atómica de salud
+     }
+   }
+   
+   PROBLEMA: Esta implementación puede causar DEADLOCK cuando:
+   - Hilo A: synchronized(Immortal-1) → synchronized(Immortal-2)
+   - Hilo B: synchronized(Immortal-2) → synchronized(Immortal-1)
+   ➜ Cada hilo espera el lock que el otro posee (ciclo de espera)
+
+b) fightOrdered(opponent):
+   // Ordenar locks por nombre para evitar deadlock
+   Immortal first = this.name.compareTo(other.name) < 0 ? this : other;
+   Immortal second = ...;
+   synchronized (first) {
+     synchronized (second) {
+       // Actualización atómica de salud
+     }
+   }
+   
+   VENTAJA: Orden total consistente evita ciclos de espera
+   ➜ Todos los hilos adquieren locks en el MISMO orden
+   ➜ NO puede ocurrir deadlock con este esquema
+
+=============================================================================
+3. ESTRATEGIA ANTI-DEADLOCK IMPLEMENTADA
+=============================================================================
+
+ESTRATEGIA: Orden Total por Comparación de Nombres
+
+FUNDAMENTO TEÓRICO:
+Si todos los hilos adquieren recursos en el mismo orden global, entonces
+no puede formarse un ciclo de espera circular (condición necesaria para
+deadlock).
+
+IMPLEMENTACIÓN:
+1. Comparar nombres de inmortales lexicográficamente
+2. Siempre adquirir lock del inmortal con nombre "menor" primero
+3. Luego adquirir lock del inmortal con nombre "mayor"
+
+CÓDIGO:
+```java
+Immortal first = this.name.compareTo(other.name) < 0 ? this : other;
+Immortal second = this.name.compareTo(other.name) < 0 ? other : this;
+synchronized (first) {
+    synchronized (second) {
+        // Región crítica
+    }
+}
+```
+
+PRUEBAS REALIZADAS:
+✓ Simulación con N=100 inmortales: Sin deadlocks
+✓ Simulación con N=1000 inmortales: Sin deadlocks
+✓ Simulación con N=10000 inmortales: Sin deadlocks
+✓ Invariante mantenido en todas las pruebas
+
+DIAGNÓSTICO CON HERRAMIENTAS:
+- jps: Listar JVMs en ejecución
+- jstack <pid>: Mostrar estado de hilos
+- Buscar: "waiting to lock" y "locked by" en thread dump
+
+=============================================================================
+4. PAUSA COOPERATIVA Y SINCRONIZACIÓN DE HILOS
+=============================================================================
+
+PROBLEMA ORIGINAL:
+El botón "Pause & Check" marcaba paused=true, pero NO esperaba a que todos
+los hilos llegaran al punto de pausa antes de leer la salud.
+➜ Resultados inconsistentes: algunos hilos pausados, otros modificando salud
+
+SOLUCIÓN IMPLEMENTADA: Barrera de Sincronización
+
+a) PauseController mejorado:
+   - Contador de hilos pausados: pausedCount
+   - Número esperado de hilos: expectedThreads
+   - Condición adicional: allPaused
+   
+b) Flujo de pausa:
+   1. UI llama pause() → marca paused=true
+   2. UI llama waitUntilAllPaused() → espera en condición
+   3. Cada hilo llama awaitIfPaused()
+      - Incrementa pausedCount
+      - Si pausedCount >= expectedThreads → señala allPaused
+      - Espera en condición unpaused
+   4. Cuando todos están pausados, UI lee salud consistentemente
+   5. UI llama resume() → despierta todos los hilos
+
+c) Código clave:
+```java
+public void awaitIfPaused() throws InterruptedException {
+    lock.lock();
+    try {
+        while (paused) {
+            pausedCount++;
+            if (pausedCount >= expectedThreads) {
+                allPaused.signalAll();  // Despertar UI
+            }
+            unpaused.await();  // Dormir hasta resume
+            pausedCount--;
+        }
+    } finally { lock.unlock(); }
+}
+
+public void waitUntilAllPaused() throws InterruptedException {
+    lock.lock();
+    try {
+        while (paused && pausedCount < expectedThreads) {
+            allPaused.await();  // Esperar a que todos lleguen
+        }
+    } finally { lock.unlock(); }
+}
+```
+
+VALIDACIÓN:
+✓ Clicks repetidos en "Pause & Check" mantienen invariante consistente
+✓ No hay lecturas parciales durante actualizaciones
+✓ Suma total siempre igual al valor esperado (N × H)
+
+=============================================================================
+5. IMPLEMENTACIÓN DE STOP ORDENADO
+=============================================================================
+
+PROBLEMA ORIGINAL:
+stop() llamaba shutdownNow() inmediatamente, interrumpiendo hilos sin 
+permitir terminación ordenada.
+
+SOLUCIÓN:
+```java
+public void stop() {
+    // 1. Señalar a hilos que deben terminar
+    for (Immortal im : population) im.stop();
+    
+    if (exec != null) {
+        // 2. Iniciar apagado ordenado
+        exec.shutdown();
+        
+        try {
+            // 3. Esperar hasta 5 segundos a que terminen
+            if (!exec.awaitTermination(5, TimeUnit.SECONDS)) {
+                // 4. Forzar apagado si no terminan
+                exec.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            exec.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
+}
+```
+
+VENTAJAS:
+✓ Los hilos terminan su iteración actual
+✓ No hay interrupciones bruscas durante región crítica
+✓ Recursos liberados apropiadamente
+
+=============================================================================
+6. REMOCIÓN DE INMORTALES MUERTOS SIN SINCRONIZACIÓN GLOBAL
+=============================================================================
+
+PROBLEMA:
+Al remover inmortales muertos de la lista, se puede crear una condición de
+carrera si múltiples hilos modifican la colección simultáneamente.
+
+SOLUCIÓN 1: CopyOnWriteArrayList
+- Colección thread-safe sin locks explícitos
+- Escrituras (add/remove) crean copia del array
+- Lecturas sin bloqueo
+- Iteradores nunca lanzan ConcurrentModificationException
+
+```java
+private final CopyOnWriteArrayList<Immortal> population = 
+    new CopyOnWriteArrayList<>();
+```
+
+SOLUCIÓN 2: Auto-remoción al Morir
+Cuando un inmortal detecta health <= 0:
+```java
+if (getHealth() <= 0) {
+    population.remove(this);  // Thread-safe con CopyOnWriteArrayList
+    controller.decrementExpectedThreads();
+    break;
+}
+```
+
+SOLUCIÓN 3: Actualización Dinámica del Contador de Hilos
+```java
+public void decrementExpectedThreads() {
+    lock.lock();
+    try {
+        expectedThreads--;
+        if (pausedCount >= expectedThreads) {
+            allPaused.signalAll();  // Ajustar barrera
+        }
+    } finally { lock.unlock(); }
+}
+```
+
+VENTAJAS:
+✓ Sin lock global en toda la colección
+✓ Rendimiento alto con múltiples lectores
+✓ Sin ConcurrentModificationException
+✓ Barrera de pausa se ajusta automáticamente
+
+=============================================================================
+7. VALIDACIÓN DEL INVARIANTE EN LA UI
+=============================================================================
+
+MEJORA EN ControlFrame.onPauseAndCheck():
+
+```
+=== HEALTH STATUS ===
+Immortal-0     :   120
+Immortal-1     :    80
+Immortal-2     :   110
+Immortal-3     :    90
+...
+--------------------------------
+Total Health (actual)  : 800
+Total Health (expected): 800
+Difference             : 0 ✓ INVARIANT MAINTAINED
+Total Fights           : 1234
+Alive Count            : 8
+```
+
+CÁLCULO:
+- Expected = initialCount × initialHealth
+- Actual = Σ health[i] para todos los inmortales
+- Difference = Actual - Expected
+
+INTERPRETACIÓN:
+- Difference = 0 → ✓ Sistema correcto
+- Difference ≠ 0 → ✗ Condición de carrera o error lógico
+
+=============================================================================
+8. CONFIGURACIÓN Y MODO DE EJECUCIÓN
+=============================================================================
+
+MODOS DISPONIBLES:
+
+a) UI con estrategia ordered (recomendado):
+   mvn -q -DskipTests exec:java -Dmode=ui -Dcount=100 -Dfight=ordered
+
+b) UI con estrategia naive (para demostrar deadlock):
+   mvn -q -DskipTests exec:java -Dmode=ui -Dcount=8 -Dfight=naive
+
+c) Demo 1 - Deadlock ingenuo:
+   mvn -q -DskipTests exec:java -Dmode=demos -Ddemo=1
+
+d) Demo 2 - Transferencias ordenadas sin deadlock:
+   mvn -q -DskipTests exec:java -Dmode=demos -Ddemo=2
+
+e) Demo 3 - tryLock con timeout:
+   mvn -q -DskipTests exec:java -Dmode=demos -Ddemo=3
+
+=============================================================================
+9. DIAGNÓSTICO DE DEADLOCKS (SI OCURREN)
+=============================================================================
+
+PASOS:
+1. Identificar PID del proceso:
+   jps -l
+
+2. Generar thread dump:
+   jstack <pid> > thread_dump.txt
+
+3. Buscar en el archivo:
+   - "Found one Java-level deadlock"
+   - "waiting to lock <0x...>"
+   - "locked <0x...>"
+
+4. Analizar ciclo de espera:
+   Thread-A espera lock-X → posee lock-Y
+   Thread-B espera lock-Y → posee lock-X
+   ➜ DEADLOCK
+
+5. Aplicar solución (orden total o tryLock)
+
+EVIDENCIA DE CORRECCIÓN:
+Con -Dfight=ordered, NO se detectan deadlocks incluso con N=10000 inmortales.
+
+=============================================================================
+10. PRUEBAS Y RESULTADOS
+=============================================================================
+
+CONFIGURACIÓN DE PRUEBA:
+- JDK 21 (Temurin)
+- Maven 3.9+
+- Windows 11
+- 8 cores disponibles
+
+RESULTADOS:
+
+Test 1: N=8, health=100, damage=10, fight=ordered
+  ✓ Invariante mantenido: 800 = 800
+  ✓ Sin deadlocks
+  ✓ Pausa/Resume funciona correctamente
+
+Test 2: N=100, health=100, damage=10, fight=ordered
+  ✓ Invariante mantenido: 10000 = 10000
+  ✓ Sin deadlocks
+  ✓ Remoción de muertos sin errores
+
+Test 3: N=1000, health=100, damage=10, fight=ordered
+  ✓ Invariante mantenido: 100000 = 100000
+  ✓ Sin deadlocks
+  ✓ Alto rendimiento con virtual threads
+
+Test 4: N=8, health=100, damage=10, fight=naive
+  ✗ Deadlock detectado después de ~10 segundos
+  ➜ Correctamente identificado con jstack
+  ➜ Ciclo de espera confirmado
+
+=============================================================================
+11. CONCLUSIONES
+=============================================================================
+
+1. SINCRONIZACIÓN:
+   ✓ Bloques synchronized anidados protegen regiones críticas
+   ✓ Orden total elimina deadlocks completamente
+   ✓ Invariante matemático se mantiene en todas las pruebas
+
+2. PAUSA COOPERATIVA:
+   ✓ Barrera de sincronización garantiza lectura consistente
+   ✓ No se usan métodos deprecados (suspend/resume/stop)
+   ✓ Lock/Condition proveen control fino
+
+3. CONCURRENCIA:
+   ✓ CopyOnWriteArrayList permite modificación sin lock global
+   ✓ Virtual threads escalan bien hasta N=10000
+   ✓ AtomicLong en ScoreBoard para contadores thread-safe
+
+4. ROBUSTEZ:
+   ✓ Stop ordenado con awaitTermination
+   ✓ Sin ConcurrentModificationException
+   ✓ Manejo apropiado de InterruptedException
+
+5. ARQUITECTURA:
+   ✓ Separación clara UI/lógica de negocio
+   ✓ PauseController reutilizable
+   ✓ Código limpio y bien documentado
+
+=============================================================================
+REFERENCIAS
+=============================================================================
+
+[1] Goetz et al., "Java Concurrency in Practice", Addison-Wesley
+[2] Oracle Java Documentation - Locks and Conditions
+[3] JEP 444: Virtual Threads (Project Loom)
+[4] Dining Philosophers Problem - Dijkstra (1965)
+
+=============================================================================

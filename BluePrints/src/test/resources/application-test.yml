@@ -1,0 +1,9 @@
+# Test configuration - disables JPA/DataSource auto-configuration
+# This allows tests to run with in-memory persistence without PostgreSQL
+
+spring:
+  autoconfigure:
+    exclude:
+      - org.springframework.boot.autoconfigure.orm.jpa.HibernateJpaAutoConfiguration
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceAutoConfiguration
+      - org.springframework.boot.autoconfigure.jdbc.DataSourceTransactionManagerAutoConfiguration
